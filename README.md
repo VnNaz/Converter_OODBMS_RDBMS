@@ -25,30 +25,13 @@ The main deliverable is a PL/SQL package **`OODBMS_CONVERTER`** that automates c
 | `schema.txt` | Demo relational schema used in the thesis. |
 | `object.txt` | Sample object‑type hierarchy (`PERSON_T`, `EMPLOYEE_T`, `VIP_EMPLOYEE_T`). |
 | `helper_query.txt` | Example scripts showing typical calls. |
-| `ВКР_отчет_only.pdf` | Full thesis report (Russian). |
+| `Пояснительная_записка_ВКР_Ву Хоай Нам` | Full thesis report (Russian). |
 
 ## Prerequisites
 
 * Oracle Database 19c (works from 12c) with PL/SQL enabled  
 * Privileges: `CREATE TYPE`, `CREATE TABLE`, `CREATE PROCEDURE`  
 * SQL\*Plus, SQLcl or SQL Developer
-
-## Installation
-
-```bash
-# Clone repository
-$ git clone https://github.com/yourusername/oodbms_converter.git
-$ cd oodbms_converter
-```
-
-```sql
--- As a schema owner:
-@header.txt
-@body.txt
-
--- (Optional) load demo schema
-@schema.txt
-```
 
 ## Usage
 
@@ -81,14 +64,10 @@ See Chapter 6 of the thesis for benchmarks and profiling details.
 
 ## Roadmap
 
-- [ ] Support partitioned tables  
-- [ ] Automatic generation of constructors and MAP/ORDER methods  
+- [ ] Support GUI 
+- [ ] More Optimization
 - [ ] CLI wrapper in Python
-
-## License
-
-Distributed under the MIT License. See `LICENSE` for details.
 
 ## Author
 
-**[Your Name]** — 2025 — Faculty of Computer Science, [University]
+**Vu Nam** — 2025 — Направление «Математическое обеспечение и программное обеспечение», Санкт‑Петербургский политехнический университет Петра Великого
