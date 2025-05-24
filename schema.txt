@@ -1,0 +1,57 @@
+ DROP TABLE student_course CASCADE CONSTRAINTS;
+ DROP TABLE user_profiles CASCADE CONSTRAINTS;
+ DROP TABLE items CASCADE CONSTRAINTS;
+ DROP TABLE users CASCADE CONSTRAINTS;
+ DROP TABLE students CASCADE CONSTRAINTS;
+ DROP TABLE courses CASCADE CONSTRAINTS;
+ DROP TABLE categories CASCADE CONSTRAINTS;
+
+ CREATE TABLE users (
+ id INTEGER PRIMARY KEY,
+ username VARCHAR2(100)
+ );
+
+ CREATE TABLE user_profiles (
+ id INTEGER PRIMARY KEY,
+ age INTEGER,
+ email VARCHAR2(100),
+ description VARCHAR2(255),
+ CONSTRAINT fk_user_profile_user FOREIGN KEY (id) REFERENCES
+ users(id)
+ );
+
+ CREATE TABLE categories (
+ id INTEGER PRIMARY KEY,
+ category_name VARCHAR2(100)
+ );
+
+ CREATE TABLE items (
+ id INTEGER PRIMARY KEY,
+ name VARCHAR2(100),
+ price INTEGER,
+ category INTEGER,
+ CONSTRAINT fk_items_category FOREIGN KEY (category)
+ REFERENCES categories(id)
+ );
+
+ CREATE TABLE students (
+ id INTEGER PRIMARY KEY,
+ name VARCHAR2(100)
+ );
+
+ CREATE TABLE courses (
+ id INTEGER PRIMARY KEY,
+ name VARCHAR2(100),
+ category VARCHAR2(100),
+ teacher VARCHAR2(100)
+ );
+
+ CREATE TABLE student_course (
+ id_student INTEGER,
+ id_course INTEGER,
+ PRIMARY KEY (id_student, id_course),
+ CONSTRAINT fk_student FOREIGN KEY (id_student) REFERENCES
+ students(id),
+ CONSTRAINT fk_course FOREIGN KEY (id_course) REFERENCES
+ courses(id)
+ );

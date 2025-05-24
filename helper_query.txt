@@ -1,0 +1,62 @@
+SELECT RPAD(' ', 3*(LEVEL-1)) || type_name
+FROM user_types
+WHERE typecode = 'OBJECT'
+CONNECT BY PRIOR type_name = supertype_name;
+
+execute OODBMS_CONVERTER.object_to_table(p_type_name=> 'person_t', p_table_name=> 'person_t_tab')
+
+execute OODBMS_CONVERTER.object_to_table(p_type_name=> 'person_t', p_table_name=> 'person_t_tab', cascade => true)
+
+execute OODBMS_CONVERTER.object_to_table(p_type_name=> 'person_t', p_table_name=> 'person_t_tab', cascade => true, level => 1)
+
+execute OODBMS_CONVERTER.draw_hierarchy();
+
+select OODBMS_CONVERTER.type_to_table('EMPLOYEE_T') from dual;
+
+execute OODBMS_CONVERTER.get_relations();
+
+execute OODBMS_CONVERTER.get_relations('JOBS');
+
+execute OODBMS_CONVERTER.get_relation_between_tables('employees','JOBS');
+
+select OODBMS_CONVERTER.table_to_type('user_profiles');
+from dual;
+
+select OODBMS_CONVERTER.table_to_type('items');
+from dual;
+
+select OODBMS_CONVERTER.table_to_type('students');
+from dual;
+
+execute OODBMS_CONVERTER.table_to_type('user_profiles', cascade => true);
+
+execute OODBMS_CONVERTER.table_to_type('items', cascade => true); 
+
+execute OODBMS_CONVERTER.table_to_type('students', cascade => true);
+
+DECLARE
+v_start_time_1  NUMBER;
+v_end_time_1    NUMBER;
+v_elapsed_1     NUMBER;
+v_result_1      VARCHAR2(4000);  
+
+v_start_time_2  NUMBER;
+v_end_time_2    NUMBER;
+v_elapsed_2     NUMBER;
+v_result_2      VARCHAR2(4000);  
+BEGIN
+-- First execution
+v_start_time_1 := DBMS_UTILITY.GET_TIME;
+SELECT OODBMS_CONVERTER.table_to_type('students') INTO v_result_1 FROM dual;
+v_end_time_1 := DBMS_UTILITY.GET_TIME;
+v_elapsed_1 := (v_end_time_1 - v_start_time_1) / 100;
+DBMS_OUTPUT.PUT_LINE('First execution time: ' || v_elapsed_1 || ' seconds');
+
+-- Second execution
+v_start_time_2 := DBMS_UTILITY.GET_TIME;
+SELECT OODBMS_CONVERTER.table_to_type('students') INTO v_result_2 FROM dual;
+v_end_time_2 := DBMS_UTILITY.GET_TIME;
+v_elapsed_2 := (v_end_time_2 - v_start_time_2) / 100;
+DBMS_OUTPUT.PUT_LINE('Second execution time: ' || v_elapsed_2 || ' seconds');
+END;
+/

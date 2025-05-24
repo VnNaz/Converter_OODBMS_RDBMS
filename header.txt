@@ -1,0 +1,83 @@
+create or replace PACKAGE OODBMS_CONVERTER AS 
+-- **********************************************
+-- TYPE FOR SQL QUERY - INFORMATION ABOUT OBJECT
+-- **********************************************
+TYPE relation_rec IS RECORD (
+    main_tab VARCHAR2(100),
+    child_tab VARCHAR2(100),
+    cols     VARCHAR2(4000),
+    relation_type VARCHAR2(10)
+);
+
+-- **********************************************
+-- TYPE FOR SQL QUERY - INFORMATION ABOUT COLUMNS
+-- **********************************************
+TYPE column_rec IS RECORD (
+    column_name VARCHAR2(100),
+    data_length NUMBER,
+    data_type   VARCHAR2(50),
+    data_precision NUMBER,
+    data_scale NUMBER
+);
+
+-- ******************************
+-- TYPE INDEXED TABLE FOR CACHING
+-- ******************************
+TYPE relation_dict IS TABLE OF relation_rec INDEX BY VARCHAR2(100);
+TYPE column_list IS TABLE OF column_rec INDEX BY VARCHAR2(100);
+
+-- ***********************************
+-- VARIABLE INDEXED TABLE FOR CACHING
+-- ***********************************
+relations relation_dict;  
+
+-- ***************************
+-- FUNCTION FOR RELOAD CACHING
+-- ***************************
+procedure reload_cache;
+
+function get_type_ddl 
+    (p_type_name in varchar2, p_table_name in varchar2, cascade in boolean default false) return varchar2;
+procedure type_to_table
+    (p_type_name in varchar2, p_table_name in varchar2, cascade in boolean default false, level in integer default 2147483647);
+
+-- ********************************
+-- VISUALIZATION HIERARCHY OF TYPE 
+-- ********************************
+procedure draw_hierarchy(p_type_name in varchar2 default null);
+
+procedure get_relation_between_tables
+(p_parent_name in varchar2, p_child_name in varchar2);
+
+procedure get_relations 
+(p_tab_name in varchar2 default null);
+
+-- ********************************
+-- CONVERT TABLE TO TYPE 
+-- ********************************
+procedure table_to_type
+(p_table_name in varchar2, cascade in boolean default false);
+
+-- ********************************
+-- CONVERT TABLE TO TYPE 
+-- ********************************
+function table_to_type
+(p_table_name in varchar2, cascade in boolean default true) return varchar2 RESULT_CACHE;
+
+-- ********************************
+-- CONVERT TYPE TO TABLE 
+-- ********************************
+function type_to_table
+(p_type_name in varchar2, level in integer default 2147483647) return varchar2 RESULT_CACHE;
+
+-- ************************************
+-- GET COLUMN OF GIVE TABLE WITH OUT FK
+-- ************************************
+function get_cols_except_fk(p_table_name in varchar2) return column_list;
+
+-- ********************************
+-- GET TYPE ATTRIBUTE OF GIVEN TYPE
+-- ********************************
+function get_type_att(p_type_name in varchar2) return column_list;
+
+END OODBMS_CONVERTER;

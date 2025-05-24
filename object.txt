@@ -1,0 +1,21 @@
+
+	CREATE OR REPLACE TYPE PERSON_T AS OBJECT 
+	(
+	id INTEGER,
+	name VARCHAR2(4000),
+	return VARCHAR2
+	) 
+	NOT FINAL;
+	
+	CREATE OR REPLACE TYPE employee_t under person_t
+	(
+	salary number(5,1),
+	return VARCHAR2
+	) 
+	NOT FINAL;
+	
+	CREATE OR REPLACE EDITIONABLE TYPE VIP_EMPLOYEE_T under employee_t
+	(
+	vip_info varchar2(250)
+	) 
+	NOT FINAL;

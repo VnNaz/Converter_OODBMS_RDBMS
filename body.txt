@@ -1,0 +1,588 @@
+create or replace PACKAGE BODY OODBMS_CONVERTER AS 
+-- function
+function get_type_ddl
+    (p_type_name in varchar2, p_table_name in varchar2, cascade in boolean default false) return varchar2 is 
+v_sql varchar2(32767) default '';
+v_text varchar2(32767) default '';
+e_table_name_exists exception;
+cols column_list := get_type_att(p_type_name);
+indx varchar2(100);
+begin 
+-- check if type or table name is exists
+select object_name
+into v_text
+from user_objects
+where object_name in(upper(p_type_name),upper(p_table_name))
+and object_type in('TABLE', 'TYPE');
+
+-- if table name is already exists then throw err
+if v_text != upper(p_type_name) then 
+raise e_table_name_exists;
+end if;
+
+-- sql create table base on object type
+v_sql := 'create table ' || p_table_name || ' (' || chr(10);
+-- Get the first index
+indx := cols.FIRST;
+
+-- Loop while index is not null
+WHILE indx IS NOT NULL LOOP
+    if cols(indx).data_length is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_length || '),';
+    elsif cols(indx).data_precision is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_precision || ',' || cols(indx).data_scale || '),';
+    else 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || ',';
+    end if;
+    v_sql := v_sql || chr(10);
+  
+  -- Move to the next index
+  indx := cols.NEXT(indx);
+END LOOP;
+
+return v_sql;
+exception
+   when e_table_name_exists or too_many_rows then 
+      RAISE_APPLICATION_ERROR(-20001, 'table with name ' || p_table_name || ' already exists');
+   when no_data_found then 
+      RAISE_APPLICATION_ERROR(-20002, 'no type found with name = ' || p_type_name);
+   when others then
+      -- print error trace 
+      dbms_output.put_line(dbms_utility.format_error_stack());
+      dbms_output.put_line(dbms_utility.format_error_backtrace());
+      RAISE_APPLICATION_ERROR(-20003, 'internal function error');
+end;
+
+procedure type_to_table(p_type_name in varchar2, p_table_name in varchar2, cascade in boolean default false, level in integer default 2147483647) is
+--return varchar2 is 
+type att_info_t is table of user_type_attrs%rowtype index by pls_integer;
+l_att_info att_info_t;
+v_sql varchar2(32767) default '';
+v_text varchar2(32767) default '';
+e_table_name_exists exception;
+p_level integer default level;
+begin 
+-- check if type or table name is exists
+select object_name
+into v_text
+from user_objects
+where object_name in(upper(p_type_name),upper(p_table_name))
+and object_type in('TABLE', 'TYPE');
+
+-- if table name is already exists then throw err
+if v_text != upper(p_type_name) then 
+raise e_table_name_exists;
+end if;
+
+-- sql create table base on object type
+v_sql := 'create table ' || p_table_name || ' (' || chr(10);
+select *
+bulk collect into l_att_info
+from user_type_attrs
+where type_name = upper(p_type_name);
+for indx in 1 .. l_att_info.count  loop
+if l_att_info(indx).length is not null then 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || '(' ||  l_att_info(indx).length || '),';
+elsif l_att_info(indx).precision is not null then 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || '(' ||  l_att_info(indx).precision || ',' || l_att_info(indx).scale || '),';
+else 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || ',';
+end if;
+v_sql := v_sql || chr(10);
+end loop;
+v_sql := replace(v_sql || ')', ',' || chr(10) || ')', ')');
+
+if cascade then 
+for child_type in (select type_name
+                   from user_types
+                   where supertype_name = upper(p_type_name)) loop
+p_level := p_level - 1;
+exit when p_level < 0;
+type_to_table(p_type_name => child_type.type_name, p_table_name => child_type.type_name || '_tab', cascade => true, level => p_level);
+end loop;
+end if;
+dbms_output.put_line(lower(v_sql || chr(10) || '/'));
+exception
+   when e_table_name_exists or too_many_rows then 
+      dbms_output.put_line('table with name ' || p_table_name || ' already exists');
+   when no_data_found then 
+      dbms_output.put_line('no type found with name = ' || p_type_name);
+   when others then
+      -- print error trace 
+      dbms_output.put_line ( dbms_utility.format_error_stack() );
+      dbms_output.put_line ( dbms_utility.format_error_backtrace());
+end;
+
+PROCEDURE draw_hierarchy(
+    p_type_name IN VARCHAR2 DEFAULT NULL
+) IS
+    CURSOR hierarchy_cursor_spec IS 
+        SELECT 
+            RPAD(' ', 3 * (LEVEL - 1)) ||
+            CASE 
+                WHEN LEVEL = 1 THEN NULL
+                WHEN CONNECT_BY_ISLEAF = 1 THEN '|____ '  -- Last child
+                ELSE '|---- '  -- Middle child
+            END || type_name AS class
+        FROM all_types
+        WHERE typecode = 'OBJECT'
+        AND OWNER=USER
+        START WITH type_name = UPPER(p_type_name)
+        CONNECT BY PRIOR type_name = supertype_name;
+        
+    CURSOR hierarchy_cursor_all IS 
+        SELECT 
+            DECODE(LEVEL, 1, CHR(10), '') || 
+            RPAD(' ', 3 * (LEVEL - 1)) ||
+            CASE 
+                WHEN LEVEL = 1 THEN NULL
+                WHEN CONNECT_BY_ISLEAF = 1 THEN '|____ '  -- Last child
+                ELSE '|---- '  -- Middle child
+            END || type_name AS class
+        FROM all_types
+        WHERE typecode = 'OBJECT'
+        AND OWNER=USER
+        CONNECT BY PRIOR type_name = supertype_name;
+
+    v_result VARCHAR2(100); -- Increased size to handle long names
+    v_count NUMBER;  -- Variable to check existence
+BEGIN
+    -- Check if the type exists
+    SELECT COUNT(*) INTO v_count 
+    FROM all_types 
+    WHERE typecode = 'OBJECT' AND type_name = UPPER(p_type_name) AND OWNER=USER;
+
+    -- If given null, check all
+    IF p_type_name IS NULL THEN
+        DBMS_OUTPUT.PUT_LINE('______HIERARCHY______');
+        OPEN hierarchy_cursor_all;
+        LOOP
+            FETCH hierarchy_cursor_all INTO v_result;
+            EXIT WHEN hierarchy_cursor_all%NOTFOUND;
+            DBMS_OUTPUT.PUT_LINE(v_result);
+        END LOOP;
+        CLOSE hierarchy_cursor_all;
+        
+    -- If not found, print a message and exit
+    ELSIF v_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Type "' || p_type_name || '" does not exist in user_types.');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('______HIERARCHY('|| upper(p_type_name) ||')______' || chr(10));
+        
+        OPEN hierarchy_cursor_spec;
+        LOOP
+            FETCH hierarchy_cursor_spec INTO v_result;
+            EXIT WHEN hierarchy_cursor_spec%NOTFOUND;
+            DBMS_OUTPUT.PUT_LINE(v_result);
+        END LOOP;
+        CLOSE hierarchy_cursor_spec;
+    END IF;
+
+END draw_hierarchy;
+
+procedure get_relation_between_tables
+(p_parent_name in varchar2, p_child_name in varchar2) is 
+begin
+IF relations.EXISTS (upper(p_parent_name) || '-' || upper(p_child_name)) THEN
+    dbms_output.put_line('relation between ' || p_parent_name || ' and ' || p_child_name || ' is : ' ||  relations(upper(p_parent_name) || '-' || upper(p_child_name)).relation_type);
+ELSIF relations.EXISTS (upper(p_child_name) || '-' || upper(p_parent_name)) THEN
+    dbms_output.put_line('relation between ' || upper(p_child_name) || ' and ' || upper(p_parent_name) || ' is : ' ||  relations(upper(p_child_name) || '-' || upper(p_parent_name)).relation_type);
+ELSE 
+    dbms_output.put_line('there are no relation between ' || upper(p_parent_name) || ' and ' || upper(p_child_name));
+END IF;
+EXCEPTION
+   WHEN no_data_found then 
+      dbms_output.put_line('there are no relation between ' || upper(p_parent_name) || ' and ' || upper(p_child_name));
+   when others then
+      -- print error trace 
+      dbms_output.put_line(dbms_utility.format_error_stack());
+      dbms_output.put_line(dbms_utility.format_error_backtrace());
+      RAISE_APPLICATION_ERROR(-20003, 'internal function error');
+end;
+
+procedure get_relations 
+(p_tab_name in varchar2 default null) is
+v_idx VARCHAR2(100);
+begin 
+-- Get the first index
+v_idx := relations.FIRST;
+
+-- Loop while index is not null
+WHILE v_idx IS NOT NULL LOOP
+
+  -- Print out the key
+  if relations(v_idx).main_tab = upper(p_tab_name)or p_tab_name is null then
+        dbms_output.put_line(relations(v_idx).main_tab || ' related with ' || relations(v_idx).child_tab || ' with relation ' || relations(v_idx).relation_type);
+  end if;
+  
+  -- Move to the next index
+  v_idx := relations.NEXT(v_idx);
+END LOOP;
+end;
+
+procedure table_to_type
+(p_table_name in varchar2, cascade in boolean default false) is
+cols column_list := get_cols_except_fk(p_table_name);
+v_sql varchar2(32767) default '';
+indx VARCHAR2(100);
+is_exist BOOLEAN := false;
+is_exist_mm BOOLEAN := false;
+begin 
+v_sql := 'create type ' || upper(p_table_name || '_t') || ' as object (' || chr(10);
+-- Get the first index
+indx := cols.FIRST;
+
+-- basic column
+WHILE indx IS NOT NULL LOOP
+    is_exist := true;
+    if cols(indx).data_length is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_length || '),';
+    elsif cols(indx).data_precision is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_precision || ',' || cols(indx).data_scale || '),';
+    else 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || ',';
+    end if;
+    v_sql := v_sql || chr(10);
+  
+  -- Move to the next index
+  indx := cols.NEXT(indx);
+END LOOP;
+
+-- related column
+if cascade then 
+    indx := relations.FIRST;
+    
+    WHILE indx IS NOT NULL LOOP
+    
+      if relations(indx).child_tab = upper(p_table_name) then
+        if relations(indx).relation_type = '1:1' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                table_to_type(p_table_name => relations(indx).main_tab, cascade => false);
+            end if;
+            v_sql := v_sql || lower(relations(indx).main_tab || '_t_ref') || ' ref ' || lower(relations(indx).main_tab || '_t') || ',';
+            v_sql := v_sql || chr(10);
+        end if;
+        
+        if relations(indx).relation_type = '1:M' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                table_to_type(p_table_name => relations(indx).main_tab, cascade => false);
+            end if;
+            dbms_output.put_line('CREATE TYPE '|| relations(indx).main_tab || '_refs_t AS TABLE OF REF ' || relations(indx).main_tab || chr(10) || '/' || chr(10));
+            v_sql := v_sql || lower(relations(indx).main_tab || '_t_refs') || ' ' || relations(indx).main_tab || '_refs_t' || ',';
+            v_sql := v_sql || chr(10);
+        end if;       
+        if relations(indx).relation_type = 'M:M' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                table_to_type(p_table_name => relations(indx).main_tab, cascade => false);
+                table_to_type(p_table_name => relations(indx).child_tab, cascade => false);
+            end if;
+            dbms_output.put_line('CREATE TYPE '|| relations(indx).main_tab || '_refs_t AS TABLE OF REF ' || relations(indx).main_tab || chr(10) || '/' || chr(10));
+            dbms_output.put_line('CREATE TYPE '|| relations(indx).child_tab || '_refs_t AS TABLE OF REF ' || relations(indx).child_tab || chr(10) || '/' || chr(10));
+            
+            dbms_output.put_line('ALTER TYPE ' || upper(relations(indx).child_tab || '_t') || chr(10) || 'ADD ATTRIBUTE (' || lower(relations(indx).main_tab || '_t_refs') || ' ' || relations(indx).main_tab || '_refs_t' || ') CASCADE;' || chr(10) || '/' || chr(10));
+            dbms_output.put_line('ALTER TYPE ' || upper(relations(indx).main_tab || '_t') || chr(10) || 'ADD ATTRIBUTE (' || lower(relations(indx).child_tab || '_t_refs') || ' ' || relations(indx).child_tab || '_refs_t' || ') CASCADE;' || chr(10) || '/' || chr(10));
+            is_exist_mm := true;
+        end if;       
+      end if;
+      
+      -- Move to the next index
+      indx := relations.NEXT(indx);
+    END LOOP;
+end if;
+
+v_sql := replace(v_sql || ')', ',' || chr(10) || ')', ')');
+v_sql := v_sql || chr(10) || '/' || chr(10);
+v_sql := upper(v_sql);
+if is_exist and not is_exist_mm then
+    dbms_output.put_line(v_sql);
+elsif not is_exist then
+    dbms_output.put_line('table ' || p_table_name || ' is not exits' );
+end if;
+end;
+
+function get_cols_except_fk(p_table_name in varchar2) return column_list is
+cols column_list;
+begin 
+FOR rec IN (select column_name, data_length, data_type, data_precision ,data_scale
+from USER_TAB_COLUMNS
+where table_name = upper(p_table_name)
+    and column_name not in (
+        select column_name
+        from USER_CONSTRAINTS 
+        join USER_CONS_COLUMNS using (table_name, constraint_name)
+        where table_name = upper(p_table_name) and constraint_type = 'R'))
+    LOOP
+        cols(rec.column_name) := rec;    
+    END LOOP;
+return cols;
+end;
+
+function get_type_att(p_type_name in varchar2) return column_list is
+cols column_list;
+begin 
+FOR rec IN (
+        select attr_name column_name, length data_length, attr_type_name data_type, 
+            precision data_precision, scale data_scale
+        from user_type_attrs
+        where type_name = upper(p_type_name))
+    LOOP
+        cols(rec.column_name) := rec;    
+    END LOOP;
+return cols;
+end;
+
+function type_to_table
+(p_type_name in varchar2, level in integer default 2147483647) return varchar2
+RESULT_CACHE
+is 
+type att_info_t is table of user_type_attrs%rowtype index by pls_integer;
+l_att_info att_info_t;
+v_sql varchar2(32767) default '';
+v_text varchar2(32767) default '';
+p_level integer default level;
+begin 
+-- check if type is exists, if not this will cause no_data_found
+select object_name
+into v_text
+from user_objects
+where object_name = upper(p_type_name)
+and object_type in('TYPE');
+
+-- sql create table base on object type
+v_sql := 'create table ' || p_type_name || '_tab' || ' (' || chr(10);
+select *
+bulk collect into l_att_info
+from user_type_attrs
+where type_name = upper(p_type_name);
+for indx in 1 .. l_att_info.count  loop
+if l_att_info(indx).length is not null then 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || '(' ||  l_att_info(indx).length || '),';
+elsif l_att_info(indx).precision is not null then 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || '(' ||  l_att_info(indx).precision || ',' || l_att_info(indx).scale || '),';
+else 
+v_sql := v_sql || l_att_info(indx).attr_name || ' ' || l_att_info(indx).attr_type_name || ',';
+end if;
+v_sql := v_sql || chr(10);
+end loop;
+v_sql := replace(v_sql || ')', ',' || chr(10) || ')', ')');
+
+if p_level > 0  then
+v_sql := lower(v_sql || ';' || chr(10));
+end if;
+
+for child_type in (select type_name
+                   from user_types
+                   where supertype_name = upper(p_type_name)) loop
+p_level := p_level - 1;
+exit when p_level < 0;
+v_sql := v_sql || chr(10) || type_to_table(p_type_name => child_type.type_name, level => p_level);
+end loop;
+
+--return lower(v_sql || chr(10) || '/');
+return v_sql;
+exception
+   when no_data_found then 
+      return 'no type found with name = ' || p_type_name;
+   when others then
+      return dbms_utility.format_error_stack()  || chr(10) || dbms_utility.format_error_backtrace();
+end;
+
+-- ********************************
+-- CONVERT TABLE TO TYPE 
+-- ********************************
+function table_to_type
+(p_table_name in varchar2, cascade in boolean default true) return varchar2 
+RESULT_CACHE
+IS
+cols column_list := get_cols_except_fk(p_table_name);
+v_sql varchar2(32767) default '';
+v_head varchar2(32767) default '';
+indx VARCHAR2(100);
+is_exist BOOLEAN := false;
+is_exist_mm BOOLEAN := false;
+begin 
+v_sql := 'create type ' || upper(p_table_name || '_t') || ' as object (' || chr(10);
+-- Get the first index
+indx := cols.FIRST;
+
+-- basic column
+WHILE indx IS NOT NULL LOOP
+    is_exist := true;
+    if cols(indx).data_length is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_length || '),';
+    elsif cols(indx).data_precision is not null then 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || '(' ||  cols(indx).data_precision || ',' || cols(indx).data_scale || '),';
+    else 
+    v_sql := v_sql || cols(indx).column_name || ' ' || cols(indx).data_type || ',';
+    end if;
+    v_sql := v_sql || chr(10);
+  
+  -- Move to the next index
+  indx := cols.NEXT(indx);
+END LOOP;
+
+-- related column
+if cascade then 
+    indx := relations.FIRST;
+    
+    WHILE indx IS NOT NULL LOOP
+    
+      if relations(indx).child_tab = upper(p_table_name) then
+        if relations(indx).relation_type = '1:1' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                v_sql := table_to_type(p_table_name => relations(indx).main_tab, cascade => false) || v_sql;
+            end if;
+            v_sql := v_sql || lower(relations(indx).main_tab || '_t_ref') || ' ref ' || lower(relations(indx).main_tab || '_t') || ',';
+            v_sql := v_sql || chr(10);
+        end if;
+        
+        if relations(indx).relation_type = '1:M' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                v_head := table_to_type(p_table_name => relations(indx).main_tab, cascade => false);
+            end if;
+            v_head := v_head || 'CREATE TYPE '|| relations(indx).main_tab || '_refs_t AS TABLE OF REF ' || relations(indx).main_tab || '_t;' || chr(10) || chr(10);
+            v_sql := v_head || v_sql;
+            v_sql := v_sql || lower(relations(indx).main_tab || '_t_refs') || ' ' || relations(indx).main_tab || '_refs_t' || ',';
+            v_sql := v_sql || chr(10);
+        end if;       
+        if relations(indx).relation_type = 'M:M' then 
+            if relations(indx).child_tab != relations(indx).main_tab then 
+                v_sql := table_to_type(p_table_name => relations(indx).main_tab, cascade => false);
+                v_sql := v_sql || table_to_type(p_table_name => relations(indx).child_tab, cascade => false);
+            end if;
+            v_sql := v_sql || 'CREATE TYPE '|| relations(indx).main_tab || '_refs_t AS TABLE OF REF ' || relations(indx).main_tab || '_t;' || chr(10) || chr(10);
+            v_sql := v_sql || 'CREATE TYPE '|| relations(indx).child_tab || '_refs_t AS TABLE OF REF ' || relations(indx).child_tab || '_t;' || chr(10) || chr(10);
+            
+            v_sql := v_sql || 'ALTER TYPE ' || upper(relations(indx).child_tab || '_t') || chr(10) || 'ADD ATTRIBUTE (' || lower(relations(indx).main_tab || '_t_refs') || ' ' || relations(indx).main_tab || '_refs_t' || ') CASCADE;' || chr(10) || chr(10);
+            v_sql := v_sql || 'ALTER TYPE ' || upper(relations(indx).main_tab || '_t') || chr(10) || 'ADD ATTRIBUTE (' || lower(relations(indx).child_tab || '_t_refs') || ' ' || relations(indx).child_tab || '_refs_t' || ') CASCADE;'|| chr(10) || chr(10);
+            
+            is_exist_mm := true;
+        end if;       
+      end if;
+      
+      -- Move to the next index
+      indx := relations.NEXT(indx);
+    END LOOP;
+end if;
+
+if not is_exist_mm then
+v_sql := replace(v_sql || ')', ',' || chr(10) || ')', ')');
+v_sql := v_sql || ';' || chr(10) || chr(10);
+end if;
+v_sql := upper(v_sql);
+if not is_exist then
+    return 'table not exist';
+end if;
+
+RETURN v_sql;
+END;
+
+
+
+
+-- ***************************
+-- CACHING FUNCTION
+-- ***************************
+procedure reload_cache is
+begin
+-- 1:1 and 1:M
+FOR rec IN (
+        WITH uniqueness AS (
+            SELECT DISTINCT 
+                t.TABLE_NAME, 
+                NVL(LISTAGG(cc.COLUMN_NAME, ', ') 
+                    WITHIN GROUP (ORDER BY cc.POSITION) 
+                    OVER (PARTITION BY cp.CONSTRAINT_NAME), ' ') cols, 
+                cp.CONSTRAINT_NAME con_name, 
+                cp.CONSTRAINT_TYPE con_type 
+            FROM USER_TABLES t
+            JOIN USER_CONS_COLUMNS cc ON (t.Table_name = cc.table_name)
+            JOIN USER_CONSTRAINTS cp ON (cp.CONSTRAINT_NAME = cc.CONSTRAINT_NAME)
+            WHERE cp.CONSTRAINT_TYPE IN ('P', 'U')
+            ORDER BY TABLE_NAME, con_type
+        ),
+        fk AS (
+            SELECT DISTINCT 
+                cr.TABLE_NAME main, 
+                cc.TABLE_NAME child,
+                NVL(LISTAGG(cc.COLUMN_NAME, ', ') 
+                    WITHIN GROUP (ORDER BY cc.POSITION) 
+                    OVER (PARTITION BY c.CONSTRAINT_NAME), ' ') cols
+            FROM USER_CONS_COLUMNS cc
+            JOIN USER_CONSTRAINTS c ON (cc.constraint_name = c.constraint_name)
+            JOIN USER_CONSTRAINTS cr ON (c.r_constraint_name = cr.constraint_name)
+            WHERE c.CONSTRAINT_TYPE = 'R'
+        )
+        SELECT DISTINCT MAIN main_tab, CHILD child_tab, FK.COLS cols, 
+               CASE WHEN UNIQUENESS.COLS IS NULL THEN '1:M' ELSE '1:1' END relation_type
+        FROM FK
+        LEFT OUTER JOIN UNIQUENESS ON (CHILD = TABLE_NAME AND UNIQUENESS.COLS = FK.COLS)
+        ORDER BY MAIN
+    ) LOOP
+        -- Store each row in the associative array using MAIN as the key
+        relations(upper(rec.main_tab || '-' || rec.child_tab)) := rec;
+    END LOOP;
+-- M:M
+FOR rec in (
+    with PKs as (
+    SELECT DISTINCT 
+        t.TABLE_NAME, 
+        NVL(LISTAGG(cc.COLUMN_NAME, ', ') 
+            WITHIN GROUP (ORDER BY cc.COLUMN_NAME) 
+            OVER (PARTITION BY cp.CONSTRAINT_NAME), ' ') PK
+    FROM USER_TABLES t
+    JOIN USER_CONS_COLUMNS cc ON (t.Table_name = cc.table_name)
+    JOIN USER_CONSTRAINTS cp ON (cp.CONSTRAINT_NAME = cc.CONSTRAINT_NAME)
+    WHERE cp.CONSTRAINT_TYPE IN ('P')),
+    FKs as (
+    SELECT DISTINCT 
+        cr.TABLE_NAME main, 
+        cc.TABLE_NAME child,
+        NVL(LISTAGG(cc.COLUMN_NAME, ', ') 
+            WITHIN GROUP (ORDER BY cc.COLUMN_NAME) 
+            OVER (PARTITION BY cc.TABLE_NAME), ' ') cols,
+        COUNT(DISTINCT cr.TABLE_NAME) OVER (PARTITION BY cc.TABLE_NAME) cnt
+    FROM USER_CONS_COLUMNS cc
+    JOIN USER_CONSTRAINTS c ON (cc.constraint_name = c.constraint_name)
+    JOIN USER_CONSTRAINTS cr ON (c.r_constraint_name = cr.constraint_name)
+    WHERE c.CONSTRAINT_TYPE = 'R'
+    ),
+    temp as (
+    SELECT distinct child, NVL(LISTAGG(main, ', ') 
+            WITHIN GROUP (ORDER BY main) 
+            OVER (PARTITION BY child), ' ') parent
+    FROM FKs
+    where exists (select 1 from pks 
+                 where table_name = child 
+                 and pk = cols) and cnt = 2
+    )
+    select child, substr(parent, 0, instr(parent, ',') - 1) first_main, substr(parent, instr(parent, ',') + 2) second_main
+    from temp) LOOP
+    
+    IF relations.EXISTS (upper(rec.first_main) || '-' || upper(rec.child)) THEN
+        relations.DELETE(upper(rec.first_main) || '-' || upper(rec.child));
+    END IF;
+    IF relations.EXISTS (upper(rec.second_main) || '-' || upper(rec.child)) THEN
+        relations.DELETE(upper(rec.second_main) || '-' || upper(rec.child));
+    END IF;
+    
+    DECLARE 
+    new_relation relation_rec;
+    BEGIN 
+        new_relation.main_tab := rec.first_main;
+        new_relation.child_tab := rec.second_main;
+        new_relation.cols     := '_';
+        new_relation.relation_type := 'M:M';
+        
+        relations(upper(rec.first_main) || '-' || upper(rec.second_main)) := new_relation;
+    END;
+
+    END LOOP;
+end;
+
+-- **********
+-- CACHING
+-- **********
+BEGIN 
+reload_cache();
+END OODBMS_CONVERTER;
